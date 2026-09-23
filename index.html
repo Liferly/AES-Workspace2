@@ -31,9 +31,11 @@ body{font-family:'Kanit',sans-serif;background:#f1f5f9;color:#0f172a}
 #hdr-avatar img{width:100%;height:100%;border-radius:.5rem;object-fit:cover}
 #sb-avatar img{width:100%;height:100%;border-radius:.75rem;object-fit:cover}
 /* ── Security gate: แสดงทันทีก่อน JS จะโหลด ── */
-#access-gate  { display: flex; }   /* เห็น gate ทันที */
+#access-gate  { display: flex; }   /* เห็น gate ทันที ทุก case */
 #access-denied{ display: none; }   /* denied hidden จนกว่า JS จะแสดง */
-html.aes-bootstrap #access-gate { display: none; }  /* bootstrap mode: ไม่มี clientId → ข้ามไปก่อน */
+/* bootstrap mode: ซ่อน Google button, แสดง setup section */
+html.aes-bootstrap #gate-login-section { display: none; }
+html:not(.aes-bootstrap) #gate-setup-section { display: none; }
 /* ── ซ่อน UI ทั้งหมดจนกว่าจะ authenticate สำเร็จ ── */
 body:not([data-auth="ok"]) header,
 body:not([data-auth="ok"]) .flex-1.flex.overflow-hidden { display: none !important; }
@@ -46,8 +48,10 @@ body:not([data-auth="ok"]) .flex-1.flex.overflow-hidden { display: none !importa
 <script>
 (function(){
   try {
-    var c = JSON.parse(localStorage.getItem('aes_cfg')||'{}');
-    if (!c.googleClientId) document.documentElement.classList.add('aes-bootstrap');
+    // ใช้ค่า default ถ้าไม่มีใน localStorage → ไม่มี bootstrap mode สำหรับ user ทั่วไป
+    var gcid = localStorage.getItem('aes_gcid') ||
+               '1057562541579-jo1brljsummf6nfbj6su55mgbri2r0sh.apps.googleusercontent.com';
+    if (!gcid) document.documentElement.classList.add('aes-bootstrap');
   } catch(e) {}
 })();
 </script>
@@ -63,14 +67,28 @@ body:not([data-auth="ok"]) .flex-1.flex.overflow-hidden { display: none !importa
       <i class="fa-solid fa-sitemap text-2xl"></i>
     </div>
     <h2 class="font-bold text-xl text-slate-800 mb-1">AES Workspace</h2>
-    <p class="text-sm text-slate-500 mb-6">กรุณาเข้าสู่ระบบด้วย Google Account<br>ของบริษัท เพื่อเข้าใช้งาน</p>
-    <div id="gate-google-btn" class="flex justify-center mb-4">
-      <button onclick="triggerGoogleSignIn()" class="flex items-center gap-3 px-5 py-2.5 border border-slate-300 rounded-xl bg-white hover:bg-slate-50 shadow-sm text-sm font-medium text-slate-700 transition">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
-        Sign in with Google
-      </button>
+    <!-- Normal mode: มี Client ID → แสดงปุ่ม Google Login -->
+    <div id="gate-login-section">
+      <p class="text-sm text-slate-500 mb-6">กรุณาเข้าสู่ระบบด้วย Google Account<br>ของบริษัท เพื่อเข้าใช้งาน</p>
+      <div id="gate-google-btn" class="flex justify-center mb-4">
+        <button onclick="triggerGoogleSignIn()" class="flex items-center gap-3 px-5 py-2.5 border border-slate-300 rounded-xl bg-white hover:bg-slate-50 shadow-sm text-sm font-medium text-slate-700 transition">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+          Sign in with Google
+        </button>
+      </div>
+      <p class="text-[10px] text-slate-400">เฉพาะทีมงาน AES เท่านั้น</p>
     </div>
-    <p class="text-[10px] text-slate-400">เฉพาะทีมงาน AES เท่านั้น</p>
+    <!-- Bootstrap mode: ยังไม่มี Client ID → Admin ต้องตั้งค่าก่อน -->
+    <div id="gate-setup-section">
+      <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-left">
+        <p class="text-xs font-semibold text-amber-700 mb-1">⚠️ ระบบยังไม่ได้ตั้งค่า</p>
+        <p class="text-[11px] text-amber-600">Admin กรุณาตั้งค่า Google Client ID และ Script URL ก่อนเริ่มใช้งาน</p>
+      </div>
+      <button onclick="document.getElementById('settings-modal').classList.remove('hidden')" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-semibold transition">
+        <i class="fa-solid fa-gear mr-2"></i>ตั้งค่าระบบ (Admin Only)
+      </button>
+      <p class="text-[10px] text-slate-400 mt-3">สมาชิกทีม: รอให้ Admin ตั้งค่าก่อน แล้วเปิดลิ้งค์ใหม่อีกครั้ง</p>
+    </div>
   </div>
 </div>
 
@@ -500,7 +518,7 @@ body:not([data-auth="ok"]) .flex-1.flex.overflow-hidden { display: none !importa
 </div>
 
 <!-- MODAL: Settings -->
-<div id="settings-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+<div id="settings-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[70] flex items-center justify-center hidden p-4">
   <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto">
     <div class="flex items-center justify-between border-b border-slate-100 pb-4 mb-4">
       <div>
@@ -769,9 +787,11 @@ const MASTER_OKRS = [];  // ล้างข้อมูลตัวอย่า�
 // ─── STATE ───────────────────────────────────────────────────────
 let S = {
   view: 'board',
-  scriptUrl: localStorage.getItem('aes_url') || '',
-  adminEmails: (localStorage.getItem('aes_admins') || 'toon@aes.com,lilly@aes.com').split(',').map(e=>e.trim()),
-  googleClientId: localStorage.getItem('aes_gcid') || '',
+  scriptUrl: localStorage.getItem('aes_url') ||
+    'https://script.google.com/macros/s/AKfycbzPwD9e7GIxcLpaRRvrkg3RQAHaPP352Q1-sro9tgMCXuFwt6cUY-7oHxqYrQ8RPc2loQ/exec',
+  adminEmails: (localStorage.getItem('aes_admins') || 'saranporn.r@aesen.co.th').split(',').map(e=>e.trim().toLowerCase()),
+  googleClientId: localStorage.getItem('aes_gcid') ||
+    '1057562541579-jo1brljsummf6nfbj6su55mgbri2r0sh.apps.googleusercontent.com',
   currentUser: JSON.parse(localStorage.getItem('aes_user') || 'null'),
   tasks: JSON.parse(localStorage.getItem('aes_tasks') || JSON.stringify(MASTER_TASKS)),
   okrs: JSON.parse(localStorage.getItem('aes_okrs') || JSON.stringify(MASTER_OKRS)),
@@ -1530,6 +1550,11 @@ function saveSettings() {
   localStorage.setItem('aes_gcid', S.googleClientId);
   closeSettings();
   showToast('บันทึกการตั้งค่าเรียบร้อย', 'success');
+  // ถ้าเพิ่ง configure Client ID ครั้งแรก (จาก bootstrap mode) → reload เพื่อให้ระบบ init ใหม่ครบถ้วน
+  if (document.documentElement.classList.contains('aes-bootstrap') && S.googleClientId) {
+    setTimeout(() => location.reload(), 900);
+    return;
+  }
   if (S.scriptUrl) { fetchSheetData(); fetchMasterData(); fetchOkrsFromSheet(); }
   if (gcidChanged && S.googleClientId) setTimeout(initGoogleSignIn, 500);
 }
@@ -1563,6 +1588,7 @@ function updateUserUI() {
     document.getElementById('hdr-name').textContent = 'ยังไม่ได้ลงชื่อ';
     document.getElementById('hdr-pos').textContent = 'Sign in with Google';
     document.getElementById('admin-dot').style.display = 'none';
+    checkAccess(); // ← กำหนดสถานะ gate/content ถึงแม้จะยังไม่ login
     return;
   }
   // Sidebar avatar
@@ -1666,9 +1692,9 @@ function checkAccess() {
   const showDenied = () => { gate.style.display = 'none'; denied.style.display = 'flex'; document.body.removeAttribute('data-auth'); };
   const showApp    = () => { gate.style.display = 'none'; denied.style.display = 'none'; document.body.setAttribute('data-auth','ok'); };
 
-  // ถ้ายังไม่ได้ตั้งค่า Google Client ID = bootstrap mode เข้าได้เลย
+  // ถ้ายังไม่ได้ตั้งค่า Google Client ID = bootstrap mode → แสดง gate (มีปุ่ม setup สำหรับ Admin)
   if (!S.googleClientId) {
-    showApp();
+    showGate();
     return;
   }
 
