@@ -78,6 +78,13 @@ body:not([data-auth="ok"]) .flex-1.flex.overflow-hidden { display: none !importa
       </div>
       <p class="text-[10px] text-slate-400">เฉพาะทีมงาน AES เท่านั้น</p>
     </div>
+    <!-- Checking access: user logged in แล้วแต่ masterStaff ยังโหลดไม่เสร็จ -->
+    <div id="gate-checking-section" style="display:none">
+      <div class="flex flex-col items-center gap-3 py-2">
+        <div class="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+        <p class="text-sm text-slate-500">กำลังตรวจสอบสิทธิ์เข้าใช้งาน…</p>
+      </div>
+    </div>
     <!-- Bootstrap mode: ยังไม่มี Client ID → Admin ต้องตั้งค่าก่อน -->
     <div id="gate-setup-section">
       <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-left">
@@ -803,6 +810,7 @@ let S = {
   dashStart: '',
   dashEnd: '',
   tlHideDone: true,
+  masterStaffLoaded: false,  // true หลัง fetchMasterData() เสร็จ (ป้องกัน race condition)
   masterStaff: [],    // ดึงจาก Sheet Master_Staff
   masterDepts: [],    // ดึงจาก Sheet Master_Dept
   masterKPIs: [],     // ดึงจาก Sheet Master_KPI
@@ -1419,7 +1427,15 @@ async function fetchMasterData() {
     populateDropdownsFromMaster();
     populateStaffDropdowns(); // refresh assignee/owner/filter
     renderDeptPills();        // refresh dept filter pills
+
+    // ── re-check access now that masterStaff is loaded ───────────
+    // แก้ race condition: user อาจ login แล้วแต่ถูก deny เพราะ masterStaff
+    // ยังว่างอยู่ตอน checkAccess() ทำงานครั้งแรก → ตรวจสอบอีกครั้ง
+    S.masterStaffLoaded = true;
+    if (S.currentUser) checkAccess();
   } catch(e) {
+    S.masterStaffLoaded = true; // mark loaded even on error (avoid stuck "checking" screen)
+    if (S.currentUser) checkAccess();
     console.warn('[AES master data]', e.message);
   }
 }
@@ -1685,28 +1701,41 @@ function handleSignOut() {
 
 // ── ตรวจสอบสิทธิ์เข้าใช้งาน ─────────────────────────────────────────
 function checkAccess() {
-  const gate   = document.getElementById('access-gate');
-  const denied = document.getElementById('access-denied');
+  const gate     = document.getElementById('access-gate');
+  const denied   = document.getElementById('access-denied');
+  const checking = document.getElementById('gate-checking-section');
+  const loginSec = document.getElementById('gate-login-section');
 
-  const showGate   = () => { gate.style.display = 'flex'; denied.style.display = 'none'; document.body.removeAttribute('data-auth'); };
-  const showDenied = () => { gate.style.display = 'none'; denied.style.display = 'flex'; document.body.removeAttribute('data-auth'); };
-  const showApp    = () => { gate.style.display = 'none'; denied.style.display = 'none'; document.body.setAttribute('data-auth','ok'); };
+  // helpers
+  const showGate = (mode = 'login') => {
+    gate.style.display   = 'flex';
+    denied.style.display = 'none';
+    document.body.removeAttribute('data-auth');
+    // สลับ section ภายใน gate
+    if (loginSec)  loginSec.style.display  = (mode === 'login')    ? '' : 'none';
+    if (checking)  checking.style.display  = (mode === 'checking') ? '' : 'none';
+  };
+  const showDenied = () => {
+    gate.style.display   = 'none';
+    denied.style.display = 'flex';
+    document.body.removeAttribute('data-auth');
+    if (checking) checking.style.display = 'none';
+  };
+  const showApp = () => {
+    gate.style.display   = 'none';
+    denied.style.display = 'none';
+    document.body.setAttribute('data-auth', 'ok');
+    if (checking) checking.style.display = 'none';
+  };
 
-  // ถ้ายังไม่ได้ตั้งค่า Google Client ID = bootstrap mode → แสดง gate (มีปุ่ม setup สำหรับ Admin)
-  if (!S.googleClientId) {
-    showGate();
-    return;
-  }
+  // Bootstrap mode (ยังไม่มี Client ID)
+  if (!S.googleClientId) { showGate('login'); return; }
 
   // ยังไม่ได้ login
-  if (!S.currentUser) {
-    showGate();
-    return;
-  }
+  if (!S.currentUser) { showGate('login'); return; }
 
   // ตรวจสอบอีเมล
   const email = (S.currentUser.email || '').toLowerCase().trim();
-  // รวม whitelist จาก STAFF (hardcoded) + masterStaff (จาก Sheet) + adminEmails
   const allowed = new Set([
     ...STAFF.map(s => s.email.toLowerCase()),
     ...S.adminEmails.map(e => e.toLowerCase()),
@@ -1714,6 +1743,12 @@ function checkAccess() {
   ]);
 
   if (!allowed.has(email)) {
+    // ถ้า masterStaff ยังโหลดไม่เสร็จ → แสดง "กำลังตรวจสอบ..." แทน denied
+    // เพื่อป้องกัน race condition (fetchMasterData จะ re-call checkAccess เมื่อเสร็จ)
+    if (!S.masterStaffLoaded) {
+      showGate('checking');
+      return;
+    }
     document.getElementById('denied-email').textContent = email;
     showDenied();
     return;
