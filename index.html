@@ -30,14 +30,34 @@ body{font-family:'Kanit',sans-serif;background:#f1f5f9;color:#0f172a}
 .kr-tasks.open{display:block}
 #hdr-avatar img{width:100%;height:100%;border-radius:.5rem;object-fit:cover}
 #sb-avatar img{width:100%;height:100%;border-radius:.75rem;object-fit:cover}
+/* ── Security gate: แสดงทันทีก่อน JS จะโหลด ── */
+#access-gate  { display: flex; }   /* เห็น gate ทันที */
+#access-denied{ display: none; }   /* denied hidden จนกว่า JS จะแสดง */
+html.aes-bootstrap #access-gate { display: none; }  /* bootstrap mode: ไม่มี clientId → ข้ามไปก่อน */
+/* ── ซ่อน UI ทั้งหมดจนกว่าจะ authenticate สำเร็จ ── */
+body:not([data-auth="ok"]) header,
+body:not([data-auth="ok"]) .flex-1.flex.overflow-hidden { display: none !important; }
 </style>
+<!--
+  ── EARLY SECURITY GATE SCRIPT ──────────────────────────────────
+  รันก่อน <body> render ด้วยเลย: ถ้า bootstrap mode (ยังไม่มี clientId)
+  ให้ซ่อน gate ทันที ไม่ต้องรอ JS
+-->
+<script>
+(function(){
+  try {
+    var c = JSON.parse(localStorage.getItem('aes_cfg')||'{}');
+    if (!c.googleClientId) document.documentElement.classList.add('aes-bootstrap');
+  } catch(e) {}
+})();
+</script>
 </head>
 <body class="min-h-screen flex flex-col bg-slate-100 text-slate-800 antialiased">
 
 <!-- ══════════════════════════════════════════════════
      ACCESS GATE: เข้าสู่ระบบ (แสดงเมื่อยังไม่ได้ login)
 ══════════════════════════════════════════════════ -->
-<div id="access-gate" class="hidden fixed inset-0 bg-slate-900 z-[60] flex items-center justify-center p-4">
+<div id="access-gate" class="fixed inset-0 bg-slate-900 z-[60] items-center justify-center p-4">
   <div class="bg-white rounded-2xl max-w-xs w-full p-8 shadow-2xl text-center">
     <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-700 to-sky-500 flex items-center justify-center text-white shadow-lg mx-auto mb-4">
       <i class="fa-solid fa-sitemap text-2xl"></i>
@@ -104,7 +124,7 @@ body{font-family:'Kanit',sans-serif;background:#f1f5f9;color:#0f172a}
       <button onclick="openTaskModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5">
         <i class="fa-solid fa-plus"></i><span class="hidden sm:inline">สร้างงานใหม่</span>
       </button>
-      <button onclick="handleAdminClick()" class="p-2 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg border border-slate-200 bg-white relative">
+      <button id="btn-settings" onclick="handleAdminClick()" class="p-2 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded-lg border border-slate-200 bg-white relative">
         <i class="fa-solid fa-gear"></i>
         <span id="admin-dot" class="absolute -top-1 -right-1 w-3 h-3 bg-indigo-600 border-2 border-white rounded-full"></span>
       </button>
@@ -790,6 +810,7 @@ window.addEventListener('DOMContentLoaded', () => {
   if (S.scriptUrl) {
     fetchSheetData();      // fetches tasks (calls fetchMasterData internally on success)
     fetchMasterData();     // also fetch master data upfront (dropdowns before task sync)
+    fetchOkrsFromSheet();  // fetch OKRs from Sheet on startup
   }
 });
 
@@ -1509,7 +1530,7 @@ function saveSettings() {
   localStorage.setItem('aes_gcid', S.googleClientId);
   closeSettings();
   showToast('บันทึกการตั้งค่าเรียบร้อย', 'success');
-  if (S.scriptUrl) { fetchSheetData(); fetchMasterData(); }
+  if (S.scriptUrl) { fetchSheetData(); fetchMasterData(); fetchOkrsFromSheet(); }
   if (gcidChanged && S.googleClientId) setTimeout(initGoogleSignIn, 500);
 }
 function copyCode() {
@@ -1561,6 +1582,9 @@ function updateUserUI() {
   document.getElementById('hdr-name').textContent = s.name;
   document.getElementById('hdr-pos').textContent = (isAdmin() ? '🔒 Admin · ' : '') + (s.dept || 'AES');
   document.getElementById('admin-dot').style.display = isAdmin() ? 'block' : 'none';
+  // ซ่อนปุ่ม Settings สำหรับ Member (ไม่ใช่ Admin)
+  const btnSettings = document.getElementById('btn-settings');
+  if (btnSettings) btnSettings.style.display = (isAdmin() || !S.googleClientId) ? '' : 'none';
   // ตรวจสิทธิ์การเข้าถึงทุกครั้งที่ user เปลี่ยน
   checkAccess();
 }
@@ -1637,20 +1661,20 @@ function handleSignOut() {
 function checkAccess() {
   const gate   = document.getElementById('access-gate');
   const denied = document.getElementById('access-denied');
-  const hdr    = document.querySelector('header');
-  const body   = document.querySelector('.flex-1.flex.overflow-hidden');
+
+  const showGate   = () => { gate.style.display = 'flex'; denied.style.display = 'none'; document.body.removeAttribute('data-auth'); };
+  const showDenied = () => { gate.style.display = 'none'; denied.style.display = 'flex'; document.body.removeAttribute('data-auth'); };
+  const showApp    = () => { gate.style.display = 'none'; denied.style.display = 'none'; document.body.setAttribute('data-auth','ok'); };
 
   // ถ้ายังไม่ได้ตั้งค่า Google Client ID = bootstrap mode เข้าได้เลย
   if (!S.googleClientId) {
-    gate.classList.add('hidden');
-    denied.classList.add('hidden');
+    showApp();
     return;
   }
 
   // ยังไม่ได้ login
   if (!S.currentUser) {
-    gate.classList.remove('hidden');
-    denied.classList.add('hidden');
+    showGate();
     return;
   }
 
@@ -1664,15 +1688,13 @@ function checkAccess() {
   ]);
 
   if (!allowed.has(email)) {
-    gate.classList.add('hidden');
-    denied.classList.remove('hidden');
     document.getElementById('denied-email').textContent = email;
+    showDenied();
     return;
   }
 
   // ✅ เข้าได้
-  gate.classList.add('hidden');
-  denied.classList.add('hidden');
+  showApp();
 }
 
 // ─── SHEETS ───────────────────────────────────────────────────────
@@ -1756,7 +1778,44 @@ async function syncToSheet() {
 
 // ─── STORAGE ─────────────────────────────────────────────────────
 function saveTasks() { localStorage.setItem('aes_tasks',JSON.stringify(S.tasks)); }
-function saveOkrs() { localStorage.setItem('aes_okrs',JSON.stringify(S.okrs)); }
+
+function saveOkrs() {
+  localStorage.setItem('aes_okrs', JSON.stringify(S.okrs));
+  syncOkrsToSheet(); // ← sync ไปยัง Google Sheet ทุกครั้งที่บันทึก OKR
+}
+
+// ─── SYNC OKRs ↔ SHEET ───────────────────────────────────────────
+async function syncOkrsToSheet() {
+  if (!S.scriptUrl) return;
+  try {
+    await fetch(S.scriptUrl, {
+      method:   'POST',
+      redirect: 'follow',
+      // ไม่ใส่ Content-Type → browser ใช้ text/plain (CORS-safe)
+      // Apps Script อ่าน e.postData.contents ได้ปกติ
+      body: JSON.stringify({ action: 'saveOkrs', okrs: S.okrs })
+    });
+  } catch(e) {
+    console.warn('[AES OKR sync]', e.message);
+  }
+}
+
+async function fetchOkrsFromSheet() {
+  if (!S.scriptUrl) return;
+  try {
+    const url = S.scriptUrl + (S.scriptUrl.includes('?') ? '&' : '?') + 'action=getOkrs';
+    const r = await fetch(url, { redirect: 'follow' });
+    if (!r.ok) return;
+    const data = JSON.parse(await r.text());
+    if (data.status === 'ok' && Array.isArray(data.okrs) && data.okrs.length > 0) {
+      S.okrs = data.okrs;
+      localStorage.setItem('aes_okrs', JSON.stringify(S.okrs));
+      renderOKRs();
+    }
+  } catch(e) {
+    console.warn('[AES OKR fetch]', e.message);
+  }
+}
 
 // ─── UTILS ───────────────────────────────────────────────────────
 function showToast(msg,type='info'){
@@ -1773,9 +1832,32 @@ function getInit(name){
   if(p.length>=2) return (p[0][0]+p[1][0]).toUpperCase();
   return name.substring(0,2).toUpperCase();
 }
+function normalizeDate(d) {
+  if (!d) return '';
+  const s = String(d).trim();
+  // Already ISO YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  // JS Date toString: "Thu Sep 18 2026 00:00:00 GMT+0700 ..."
+  try {
+    const dt = new Date(s);
+    if (!isNaN(dt.getTime())) {
+      const y = dt.getFullYear();
+      const m = String(dt.getMonth() + 1).padStart(2, '0');
+      const dd = String(dt.getDate()).padStart(2, '0');
+      return `${y}-${m}-${dd}`;
+    }
+  } catch(e) {}
+  return s;
+}
 function fmtDate(d){
   if(!d) return '';
-  try{ const [y,m,dd]=d.split('-'); return `${dd}/${m}/${y.slice(2)}`; }catch(e){ return d; }
+  try{
+    const iso = normalizeDate(d);
+    if(!iso) return '';
+    const [y,m,dd] = iso.split('-');
+    if(!y||!m||!dd) return '';
+    return `${dd}/${m}/${y.slice(2)}`;
+  }catch(e){ return String(d); }
 }
 function esc(s){
   if(!s) return '';
